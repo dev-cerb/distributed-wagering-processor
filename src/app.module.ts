@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { MikroOrmModule } from '@mikro-orm/nestjs';
 import { PostgreSqlDriver } from '@mikro-orm/postgresql';
+import { Migrator } from '@mikro-orm/migrations';
 
-import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { AppController } from './app.controller.js';
 
 @Module({
   imports: [
@@ -12,15 +13,11 @@ import { AppService } from './app.service.js';
       isGlobal: true,
       envFilePath: '.env',
     }),
-    MikroOrmModule.forRootAsync({
+    MikroOrmModule.forRoot({
       driver: PostgreSqlDriver,
-      inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        clientUrl: configService.getOrThrow<string>('DATABASE_URL'),
-        driver: PostgreSqlDriver,
-        autoLoadEntities: true,
-        allowGlobalContext: false,
-      }),
+      clientUrl: process.env.DATABASE_URL,
+      autoLoadEntities: true,
+      extensions: [Migrator],
     }),
   ],
   controllers: [AppController],
