@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@mikro-orm/nestjs';
-import { EntityRepository } from '@mikro-orm/postgresql';
+import { EntityManager, EntityRepository } from '@mikro-orm/postgresql';
 
 import { Money } from '../../shared/domain/money.js';
 import { WalletEntity } from '../../wallets/entities/wallet.entity.js';
@@ -57,10 +57,10 @@ export class WagerTransactionRepositoryImpl implements WagerTransactionRepositor
     return this.toDomain(entity);
   }
 
-  async save(transaction: WagerTransaction): Promise<void> {
-    const em = this.repository.getEntityManager();
+  async save(transaction: WagerTransaction, em: EntityManager): Promise<void> {
+    const repository = em.getRepository(WagerTransactionEntity);
 
-    let entity = await this.repository.findOne({
+    let entity = await repository.findOne({
       id: transaction.id,
     });
 
@@ -90,9 +90,9 @@ export class WagerTransactionRepositoryImpl implements WagerTransactionRepositor
     };
 
     if (entity) {
-      this.repository.assign(entity, data);
+      repository.assign(entity, data);
     } else {
-      entity = this.repository.create({
+      entity = repository.create({
         id: transaction.id,
         ...data,
         createdAt: transaction.createdAt,
@@ -100,7 +100,6 @@ export class WagerTransactionRepositoryImpl implements WagerTransactionRepositor
     }
 
     em.persist(entity);
-    await em.flush();
   }
 
   private toDomain(entity: WagerTransactionEntity): WagerTransaction {

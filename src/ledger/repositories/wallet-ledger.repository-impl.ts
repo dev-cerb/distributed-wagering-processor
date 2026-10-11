@@ -1,5 +1,5 @@
 import { InjectRepository } from '@mikro-orm/nestjs';
-import { EntityRepository } from '@mikro-orm/postgresql';
+import { EntityManager, EntityRepository } from '@mikro-orm/postgresql';
 import { Money } from '../../shared/domain/money.js';
 import { WalletEntity } from '../../wallets/entities/wallet.entity.js';
 import { WagerTransactionEntity } from '../../wager-transactions/entities/wager-transaction.entity.js';
@@ -29,10 +29,10 @@ export class WalletLedgerRepositoryImpl implements WalletLedgerRepository {
     return entities.map((entity) => this.toDomain(entity));
   }
 
-  async save(entry: WalletLedgerEntry): Promise<void> {
-    const em = this.ledgerRepository.getEntityManager();
+  async save(entry: WalletLedgerEntry, em: EntityManager): Promise<void> {
+    const repository = em.getRepository(WalletLedgerEntryEntity);
 
-    const entity = this.ledgerRepository.create({
+    const entity = repository.create({
       id: entry.id,
       wallet: em.getReference(WalletEntity, entry.walletId),
       transaction: em.getReference(WagerTransactionEntity, entry.transactionId),
@@ -45,7 +45,6 @@ export class WalletLedgerRepositoryImpl implements WalletLedgerRepository {
     });
 
     em.persist(entity);
-    await em.flush();
   }
 
   private toDomain(entity: WalletLedgerEntryEntity): WalletLedgerEntry {

@@ -1,3 +1,5 @@
+import { EntityManager } from '@mikro-orm/postgresql';
+
 import { WalletLedgerEntry } from '../domain/wallet-ledger-entry.js';
 
 export interface WalletLedgerRepository {
@@ -5,5 +7,5 @@ export interface WalletLedgerRepository {
 
   findByTransactionId(transactionId: string): Promise<WalletLedgerEntry[]>;
 
-  save(entry: WalletLedgerEntry): Promise<void>;
+  save(entry: WalletLedgerEntry, em: EntityManager): Promise<void>;
 }

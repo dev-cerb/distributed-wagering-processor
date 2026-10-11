@@ -1,3 +1,5 @@
+import { EntityManager } from '@mikro-orm/postgresql';
+
 import { Wallet } from '../domain/wallet.js';
 
 export interface WalletRepository {
@@ -8,5 +10,5 @@ export interface WalletRepository {
 
   findById(id: string): Promise<Wallet | null>;
 
-  save(wallet: Wallet): Promise<void>;
+  save(wallet: Wallet, em: EntityManager): Promise<void>;
 }

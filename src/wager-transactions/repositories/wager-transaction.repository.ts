@@ -1,3 +1,5 @@
+import { EntityManager } from '@mikro-orm/postgresql';
+
 import { WagerTransaction } from '../domain/wager-transaction.js';
 
 export interface WagerTransactionRepository {
@@ -13,5 +15,5 @@ export interface WagerTransactionRepository {
     idempotencyKey: string,
   ): Promise<WagerTransaction | null>;
 
-  save(transaction: WagerTransaction): Promise<void>;
+  save(transaction: WagerTransaction, em: EntityManager): Promise<void>;
 }
