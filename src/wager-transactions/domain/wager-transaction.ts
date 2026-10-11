@@ -1,5 +1,7 @@
 import { Money } from '../../shared/domain/money.js';
 
+import { LedgerDirection } from '../../shared/domain/ledger-direction.js';
+
 export enum WagerTransactionKind {
   Opening = 'OPENING',
   Bet = 'BET',
@@ -16,8 +18,6 @@ export enum WagerTransactionStatus {
   Rejected = 'REJECTED',
   Failed = 'FAILED',
 }
-
-export type LedgerDirection = 'DEBIT' | 'CREDIT';
 
 export type FailureCode = string;
 
@@ -210,10 +210,10 @@ export class WagerTransaction {
       case WagerTransactionKind.Opening:
       case WagerTransactionKind.Win:
       case WagerTransactionKind.Refund:
-        return 'CREDIT';
+        return LedgerDirection.Credit;
 
       case WagerTransactionKind.Bet:
-        return 'DEBIT';
+        return LedgerDirection.Debit;
 
       case WagerTransactionKind.Rollback:
         if (!reference) {
@@ -221,14 +221,14 @@ export class WagerTransaction {
         }
 
         if (reference.kind === WagerTransactionKind.Bet) {
-          return 'CREDIT';
+          return LedgerDirection.Credit;
         }
 
         if (
           reference.kind === WagerTransactionKind.Win ||
           reference.kind === WagerTransactionKind.Refund
         ) {
-          return 'DEBIT';
+          return LedgerDirection.Debit;
         }
 
         throw new Error(`Cannot rollback transaction kind: ${reference.kind}`);
