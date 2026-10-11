@@ -14,7 +14,7 @@ describe('Money', () => {
       expect(money.currency).toBe('BRL');
     });
 
-    it.each(['', '-10.00', '10.999', '10.000'])(
+    it.each(['', 'NaN', 'Infinity', '1e3', '-10.00', '10.999', '10.000'])(
       'should reject invalid amount: %s',
       (amount) => {
         expect(() => Money.from({ amount, currency: 'BRL' })).toThrow();
