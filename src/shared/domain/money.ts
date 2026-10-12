@@ -58,7 +58,7 @@ export class Money {
   }
 
   isPositive(): boolean {
-    return this.value.isPositive();
+    return this.value.isPositive() && !this.value.isZero();
   }
 
   isNegative(): boolean {

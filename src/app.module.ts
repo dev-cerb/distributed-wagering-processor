@@ -7,18 +7,35 @@ import { Migrator } from '@mikro-orm/migrations';
 import { AppService } from './app.service.js';
 import { AppController } from './app.controller.js';
 
+import { WalletsModule } from './wallets/wallets.module.js';
+import { WagerTransactionsModule } from './wager-transactions/wager-transaction.module.js';
+import { WagerProcessingModule } from './wager-transactions/wager-processing.module.js';
+import { LedgerModule } from './ledger/ledger.module.js';
+import { DatabaseTransactionModule } from './shared/infrastructure/database-transaction.module.js';
+import { InboxModule } from './inbox/inbox.module.js';
+import { ScheduleModule } from '@nestjs/schedule';
+import { HealthModule } from './health/health.module.js';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
     }),
+    ScheduleModule.forRoot(),
     MikroOrmModule.forRoot({
       driver: PostgreSqlDriver,
       clientUrl: process.env.DATABASE_URL,
       autoLoadEntities: true,
       extensions: [Migrator],
     }),
+    WalletsModule,
+    WagerTransactionsModule,
+    LedgerModule,
+    DatabaseTransactionModule,
+    WagerProcessingModule,
+    InboxModule,
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [AppService],
