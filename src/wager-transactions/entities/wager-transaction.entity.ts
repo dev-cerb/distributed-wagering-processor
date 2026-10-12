@@ -106,4 +106,10 @@ export class WagerTransactionEntity {
 
   @Property({ type: 'Date', nullable: true })
   processedAt?: Date;
+
+  @Property({ type: 'string', columnType: 'numeric(18,2)', nullable: true })
+  resultBalance?: string;
+
+  @Property({ type: 'integer', nullable: true })
+  resultWalletVersion?: number;
 }

@@ -7,7 +7,11 @@ export class DatabaseTransactionService {
 
   async execute<T>(callback: (em: EntityManager) => Promise<T>): Promise<T> {
     return this.em.transactional(async (transactionalEm) => {
-      return callback(transactionalEm);
+      const result = await callback(transactionalEm);
+
+      await transactionalEm.flush();
+
+      return result;
     });
   }
 }

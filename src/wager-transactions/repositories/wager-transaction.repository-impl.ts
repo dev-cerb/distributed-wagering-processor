@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@mikro-orm/nestjs';
-import { EntityManager, EntityRepository } from '@mikro-orm/postgresql';
+import {
+  EntityManager,
+  EntityRepository,
+  LockMode,
+} from '@mikro-orm/postgresql';
 
 import { Money } from '../../shared/domain/money.js';
 import { WalletEntity } from '../../wallets/entities/wallet.entity.js';
@@ -49,6 +53,37 @@ export class WagerTransactionRepositoryImpl implements WagerTransactionRepositor
       providerId,
       idempotencyKey,
     });
+
+    if (!entity) {
+      return null;
+    }
+
+    return this.toDomain(entity);
+  }
+
+  async findByReferenceTransactionId(
+    referenceTransactionId: string,
+    em: EntityManager,
+  ): Promise<WagerTransaction[]> {
+    const repository = em.getRepository(WagerTransactionEntity);
+
+    const entities = await repository.find({
+      referenceTransaction: { id: referenceTransactionId },
+    });
+
+    return entities.map((entity) => this.toDomain(entity));
+  }
+
+  async findByIdForUpdate(
+    id: string,
+    em: EntityManager,
+  ): Promise<WagerTransaction | null> {
+    const repository = em.getRepository(WagerTransactionEntity);
+
+    const entity = await repository.findOne(
+      { id },
+      { lockMode: LockMode.PESSIMISTIC_WRITE },
+    );
 
     if (!entity) {
       return null;

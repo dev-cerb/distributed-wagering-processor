@@ -10,5 +10,7 @@ export interface WalletRepository {
 
   findById(id: string): Promise<Wallet | null>;
 
+  findByIdForUpdate(id: string, em: EntityManager): Promise<Wallet | null>;
+
   save(wallet: Wallet, em: EntityManager): Promise<void>;
 }

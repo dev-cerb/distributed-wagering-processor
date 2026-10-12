@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@mikro-orm/nestjs';
 import { EntityManager, EntityRepository } from '@mikro-orm/postgresql';
+import { LockMode } from '@mikro-orm/core';
 
 import { Money } from '../../shared/domain/money.js';
 import { Wallet } from '../domain/wallet.js';
@@ -32,6 +33,24 @@ export class WalletRepositoryImpl implements WalletRepository {
 
   async findById(id: string): Promise<Wallet | null> {
     const entity = await this.repository.findOne({ id });
+
+    if (!entity) {
+      return null;
+    }
+
+    return this.toDomain(entity);
+  }
+
+  async findByIdForUpdate(
+    id: string,
+    em: EntityManager,
+  ): Promise<Wallet | null> {
+    const repository = em.getRepository(WalletEntity);
+
+    const entity = await repository.findOne(
+      { id },
+      { lockMode: LockMode.PESSIMISTIC_WRITE },
+    );
 
     if (!entity) {
       return null;

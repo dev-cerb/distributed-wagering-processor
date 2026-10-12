@@ -43,6 +43,8 @@ export interface WagerTransactionState extends CreateWagerTransactionProps {
   referenceTransactionId?: string;
   failureCode?: FailureCode;
   processedAt?: Date;
+  resultBalance?: Money;
+  resultWalletVersion?: number;
 }
 
 export class InvalidTransactionStateError extends Error {
@@ -71,6 +73,8 @@ export class WagerTransaction {
     private _referenceTransactionId?: string,
     private _failureCode?: FailureCode,
     private _processedAt?: Date,
+    private _resultBalance?: Money,
+    private _resultWalletVersion?: number,
   ) {}
 
   static create(props: CreateWagerTransactionProps): WagerTransaction {
@@ -127,6 +131,8 @@ export class WagerTransaction {
       state.referenceTransactionId,
       state.failureCode,
       state.processedAt,
+      state.resultBalance,
+      state.resultWalletVersion,
     );
   }
 
@@ -144,6 +150,14 @@ export class WagerTransaction {
 
   get processedAt(): Date | undefined {
     return this._processedAt;
+  }
+
+  get resultBalance(): Money | undefined {
+    return this._resultBalance;
+  }
+
+  get resultWalletVersion(): number | undefined {
+    return this._resultWalletVersion;
   }
 
   markProcessed(referenceTransactionId: string | undefined, at: Date): void {
@@ -236,6 +250,25 @@ export class WagerTransaction {
       case WagerTransactionKind.Loss:
         throw new Error('LOSS does not create a ledger entry');
     }
+  }
+
+  recordResult(balance: Money, walletVersion: number): void {
+    if (this._status !== WagerTransactionStatus.Processed) {
+      throw new Error('Only processed transactions can record a result');
+    }
+
+    if (balance.currency !== this.money.currency) {
+      throw new Error(
+        'Result balance currency must match transaction currency',
+      );
+    }
+
+    if (!Number.isInteger(walletVersion) || walletVersion < 1) {
+      throw new Error('Result wallet version must be a positive integer');
+    }
+
+    this._resultBalance = balance;
+    this._resultWalletVersion = walletVersion;
   }
 
   private assertCanTransition(): void {

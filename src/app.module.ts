@@ -9,6 +9,7 @@ import { AppController } from './app.controller.js';
 
 import { WalletsModule } from './wallets/wallets.module.js';
 import { WagerTransactionsModule } from './wager-transactions/wager-transaction.module.js';
+import { WagerProcessingModule } from './wager-transactions/wager-processing.module.js';
 import { LedgerModule } from './ledger/ledger.module.js';
 import { DatabaseTransactionModule } from './shared/infrastructure/database-transaction.module.js';
 
@@ -28,6 +29,7 @@ import { DatabaseTransactionModule } from './shared/infrastructure/database-tran
     WagerTransactionsModule,
     LedgerModule,
     DatabaseTransactionModule,
+    WagerProcessingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

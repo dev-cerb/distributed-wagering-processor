@@ -15,5 +15,15 @@ export interface WagerTransactionRepository {
     idempotencyKey: string,
   ): Promise<WagerTransaction | null>;
 
+  findByReferenceTransactionId(
+    referenceTransactionId: string,
+    em: EntityManager,
+  ): Promise<WagerTransaction[]>;
+
+  findByIdForUpdate(
+    id: string,
+    em: EntityManager,
+  ): Promise<WagerTransaction | null>;
+
   save(transaction: WagerTransaction, em: EntityManager): Promise<void>;
 }
