@@ -17,5 +17,16 @@ services:
       timeout: 5s
       retries: 5
 
+  localstack:
+    image: localstack/localstack:3
+    container_name: wagering-localstack
+    ports:
+      - '4566:4566'
+    environment:
+      SERVICES: sqs
+      AWS_DEFAULT_REGION: us-east-1
+    volumes:
+      - './localstack/init:/etc/localstack/init/ready.d'
+
 volumes:
   wagering_postgres_data:
