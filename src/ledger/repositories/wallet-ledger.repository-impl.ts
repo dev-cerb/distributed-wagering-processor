@@ -29,6 +29,74 @@ export class WalletLedgerRepositoryImpl implements WalletLedgerRepository {
     return entities.map((entity) => this.toDomain(entity));
   }
 
+  async findByWalletId(
+    walletId: string,
+    limit: number,
+    cursor?: {
+      createdAt: Date;
+      id: string;
+    },
+  ): Promise<WalletLedgerEntry[]> {
+    const where: Record<string, unknown> = {
+      wallet: { id: walletId },
+    };
+
+    if (cursor) {
+      where.$or = [
+        { createdAt: { $lt: cursor.createdAt } },
+        {
+          createdAt: cursor.createdAt,
+          id: { $lt: cursor.id },
+        },
+      ];
+    }
+
+    const entities = await this.ledgerRepository.find(where, {
+      orderBy: { createdAt: 'DESC', id: 'DESC' },
+      limit,
+    });
+
+    return entities.map((entity) => this.toDomain(entity));
+  }
+
+  async reconcileWalletBalance(walletId: string): Promise<{
+    entryCount: number;
+    reconstructedBalance: string;
+  }> {
+    const result = await this.ledgerRepository
+      .getEntityManager()
+      .getConnection()
+      .execute<
+        {
+          entry_count: string;
+          reconstructed_balance: string;
+        }[]
+      >(
+        `
+      SELECT
+        COUNT(*)::text AS entry_count,
+        COALESCE(
+          SUM(
+            CASE
+              WHEN direction = 'CREDIT' THEN amount
+              WHEN direction = 'DEBIT' THEN -amount
+              ELSE 0
+            END
+          ),
+          0
+        )::numeric(18, 2)::text AS reconstructed_balance
+      FROM wallet_ledger_entries
+      WHERE wallet_id = ?
+    `,
+        [walletId],
+      );
+
+    return {
+      entryCount: Number(result[0]?.entry_count ?? 0),
+      reconstructedBalance: result[0]?.reconstructed_balance ?? '0.00',
+    };
+  }
+
   async save(entry: WalletLedgerEntry, em: EntityManager): Promise<void> {
     const repository = em.getRepository(WalletLedgerEntryEntity);
 

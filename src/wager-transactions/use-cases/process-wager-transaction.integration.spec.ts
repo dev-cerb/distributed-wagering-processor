@@ -15,6 +15,7 @@ import {
 
 import { WalletLedgerRepositoryImpl } from '../../ledger/repositories/wallet-ledger.repository-impl.js';
 import { vi } from 'vitest';
+import { ConflictException } from '@nestjs/common';
 
 describe('ProcessWagerTransactionUseCase integration', () => {
   let module: TestingModule;
@@ -230,6 +231,218 @@ describe('ProcessWagerTransactionUseCase integration', () => {
       expect(debitEntries).toHaveLength(1);
       expect(debitEntries[0]?.amount).toBe('30.00');
       expect(debitEntries[0]?.balanceAfter).toBe('70.00');
+    } finally {
+      checkEm.clear();
+    }
+  });
+
+  it('should process concurrent identical requests only once', async () => {
+    const playerId = `integration-${randomUUID()}`;
+    const externalTransactionId = randomUUID();
+    const idempotencyKey = randomUUID();
+
+    const wallet = await walletsService.open({
+      playerId,
+      initialBalance: {
+        amount: '100.00',
+        currency: 'BRL',
+      },
+    });
+
+    const input = {
+      providerId: 'integration-provider',
+      externalTransactionId,
+      idempotencyKey,
+      walletId: wallet.id,
+      playerId,
+      roundId: randomUUID(),
+      gameId: 'integration-game',
+      amount: '30.00',
+      currency: 'BRL',
+    };
+
+    const [firstResult, secondResult] = await Promise.all([
+      processWagerTransaction.execute(input),
+      processWagerTransaction.execute(input),
+    ]);
+
+    expect(firstResult.transactionId).toBe(secondResult.transactionId);
+
+    expect(
+      [firstResult, secondResult].filter(
+        (result) => result.idempotentReplay === false,
+      ),
+    ).toHaveLength(1);
+
+    expect(
+      [firstResult, secondResult].filter(
+        (result) => result.idempotentReplay === true,
+      ),
+    ).toHaveLength(1);
+
+    const checkEm = orm.em.fork();
+
+    try {
+      const persistedWallet = await checkEm.findOne(WalletEntity, {
+        id: wallet.id,
+      });
+
+      expect(persistedWallet?.balance).toBe('70.00');
+      expect(persistedWallet?.version).toBe(2);
+
+      const transactions = await checkEm.find(WagerTransactionEntity, {
+        wallet: wallet.id,
+        kind: WagerTransactionKind.Bet,
+      });
+
+      expect(transactions).toHaveLength(1);
+
+      const ledgerEntries = await checkEm.find(WalletLedgerEntryEntity, {
+        wallet: wallet.id,
+      });
+
+      expect(ledgerEntries).toHaveLength(2);
+      expect(
+        ledgerEntries.filter((entry) => entry.direction === 'DEBIT'),
+      ).toHaveLength(1);
+    } finally {
+      checkEm.clear();
+    }
+  });
+
+  it('should process concurrent requests with the same external transaction ID only once', async () => {
+    const playerId = `integration-${randomUUID()}`;
+    const externalTransactionId = randomUUID();
+
+    const wallet = await walletsService.open({
+      playerId,
+      initialBalance: { amount: '100.00', currency: 'BRL' },
+    });
+
+    const input = {
+      providerId: 'integration-provider',
+      externalTransactionId,
+      walletId: wallet.id,
+      playerId,
+      roundId: randomUUID(),
+      gameId: 'integration-game',
+      amount: '30.00',
+      currency: 'BRL',
+    };
+
+    const [firstResult, secondResult] = await Promise.all([
+      processWagerTransaction.execute({
+        ...input,
+        idempotencyKey: randomUUID(),
+      }),
+      processWagerTransaction.execute({
+        ...input,
+        idempotencyKey: randomUUID(),
+      }),
+    ]);
+
+    expect(firstResult.transactionId).toBe(secondResult.transactionId);
+
+    expect(
+      [firstResult, secondResult].filter(
+        (result) => result.idempotentReplay === false,
+      ),
+    ).toHaveLength(1);
+
+    expect(
+      [firstResult, secondResult].filter(
+        (result) => result.idempotentReplay === true,
+      ),
+    ).toHaveLength(1);
+
+    const checkEm = orm.em.fork();
+
+    try {
+      const persistedWallet = await checkEm.findOne(WalletEntity, {
+        id: wallet.id,
+      });
+
+      expect(persistedWallet?.balance).toBe('70.00');
+      expect(persistedWallet?.version).toBe(2);
+
+      const transactions = await checkEm.find(WagerTransactionEntity, {
+        wallet: wallet.id,
+        kind: WagerTransactionKind.Bet,
+      });
+
+      expect(transactions).toHaveLength(1);
+
+      const ledgerEntries = await checkEm.find(WalletLedgerEntryEntity, {
+        wallet: wallet.id,
+      });
+
+      expect(ledgerEntries).toHaveLength(2);
+      expect(
+        ledgerEntries.filter((entry) => entry.direction === 'DEBIT'),
+      ).toHaveLength(1);
+    } finally {
+      checkEm.clear();
+    }
+  });
+
+  it('should reject concurrent requests with the same external transaction ID and different payloads', async () => {
+    const playerId = `integration-${randomUUID()}`;
+    const externalTransactionId = randomUUID();
+
+    const wallet = await walletsService.open({
+      playerId,
+      initialBalance: { amount: '100.00', currency: 'BRL' },
+    });
+
+    const input = {
+      providerId: 'integration-provider',
+      externalTransactionId,
+      walletId: wallet.id,
+      playerId,
+      roundId: randomUUID(),
+      gameId: 'integration-game',
+      currency: 'BRL',
+    };
+
+    await processWagerTransaction.execute({
+      ...input,
+      idempotencyKey: randomUUID(),
+      amount: '30.00',
+    });
+
+    await expect(
+      processWagerTransaction.execute({
+        ...input,
+        idempotencyKey: randomUUID(),
+        amount: '80.00',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    const checkEm = orm.em.fork();
+
+    try {
+      const persistedWallet = await checkEm.findOne(WalletEntity, {
+        id: wallet.id,
+      });
+
+      expect(persistedWallet?.balance).toBe('70.00');
+      expect(persistedWallet?.version).toBe(2);
+
+      const transactions = await checkEm.find(WagerTransactionEntity, {
+        wallet: wallet.id,
+        kind: WagerTransactionKind.Bet,
+      });
+
+      expect(transactions).toHaveLength(1);
+
+      const ledgerEntries = await checkEm.find(WalletLedgerEntryEntity, {
+        wallet: wallet.id,
+      });
+
+      expect(ledgerEntries).toHaveLength(2);
+      expect(
+        ledgerEntries.filter((entry) => entry.direction === 'DEBIT'),
+      ).toHaveLength(1);
     } finally {
       checkEm.clear();
     }

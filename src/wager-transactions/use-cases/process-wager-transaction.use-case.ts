@@ -16,10 +16,16 @@ import {
   WagerTransactionStatus,
 } from '../domain/wager-transaction.js';
 
+import { OutboxEvent } from '../../outbox/entities/outbox-event.entity.js';
+import { OutboxEventRepositoryImpl } from '../../outbox/repositories/outbox-event.repository-impl.js';
+
 import { WalletRepositoryImpl } from '../../wallets/repositories/wallet.repository-impl.js';
 import { WagerTransactionRepositoryImpl } from '../repositories/wager-transaction.repository-impl.js';
 import { WalletLedgerRepositoryImpl } from '../../ledger/repositories/wallet-ledger.repository-impl.js';
 import { WalletLedgerEntry } from '../../ledger/domain/wallet-ledger-entry.js';
+
+import { EntityManager } from '@mikro-orm/postgresql';
+import { UniqueConstraintViolationException } from '@mikro-orm/core';
 
 export interface ProcessWagerTransactionInput {
   providerId: string;
@@ -46,6 +52,7 @@ export class ProcessWagerTransactionUseCase {
     private readonly wagerTransactionRepository: WagerTransactionRepositoryImpl,
     private readonly walletLedgerRepository: WalletLedgerRepositoryImpl,
     private readonly databaseTransaction: DatabaseTransactionService,
+    private readonly outboxRepository: OutboxEventRepositoryImpl,
   ) {}
 
   async execute(input: ProcessWagerTransactionInput) {
@@ -128,170 +135,253 @@ export class ProcessWagerTransactionUseCase {
       )
       .digest('hex');
 
-    return this.databaseTransaction.execute(async (em) => {
-      const existingByKey =
-        await this.wagerTransactionRepository.findByProviderAndIdempotencyKey(
-          input.providerId,
-          input.idempotencyKey,
-        );
-
-      const existingByExternalId =
-        await this.wagerTransactionRepository.findByProviderAndExternalTransactionId(
-          input.providerId,
-          input.externalTransactionId,
-        );
-
-      if (
-        existingByKey &&
-        existingByExternalId &&
-        existingByKey.id !== existingByExternalId.id
-      ) {
-        throw new ConflictException(
-          'Idempotency key and external transaction ID identify different transactions',
-        );
-      }
-
-      const existing = existingByKey ?? existingByExternalId;
-
-      if (existing) {
-        if (!existing.matchesPayload(payloadHash)) {
-          throw new ConflictException(
-            'Transaction identifier was reused with a different payload',
-          );
-        }
-
-        return {
-          transactionId: existing.id,
-          status: existing.status,
-          failureCode: existing.failureCode,
-          balance: existing.resultBalance?.toJSON(),
-          version: existing.resultWalletVersion,
-          idempotentReplay: true,
-        };
-      }
-
-      const wallet = await this.walletRepository.findByIdForUpdate(
-        input.walletId,
-        em,
-      );
-
-      if (!wallet) {
-        throw new NotFoundException('Wallet not found');
-      }
-
-      if (
-        wallet.playerId !== input.playerId ||
-        wallet.balance.currency !== money.currency
-      ) {
-        throw new BadRequestException(
-          'Wallet does not match player or currency',
-        );
-      }
-
-      const transaction = WagerTransaction.create({
-        id: randomUUID(),
-        providerId: input.providerId,
-        externalTransactionId: input.externalTransactionId,
-        idempotencyKey: input.idempotencyKey,
-        payloadHash,
-        walletId: wallet.id,
-        playerId: input.playerId,
-        roundId: input.roundId,
-        gameId: input.gameId,
-        kind,
-        money,
-        referenceExternalTransactionId: input.referenceExternalTransactionId,
-      });
-
-      let reference: WagerTransaction | undefined;
-
-      if (requiresReference) {
-        reference =
-          (await this.wagerTransactionRepository.findByProviderAndExternalTransactionId(
+    try {
+      return await this.databaseTransaction.execute(async (em) => {
+        const existingByKey =
+          await this.wagerTransactionRepository.findByProviderAndIdempotencyKey(
             input.providerId,
-            input.referenceExternalTransactionId!,
-          )) ?? undefined;
-
-        if (reference) {
-          reference =
-            (await this.wagerTransactionRepository.findByIdForUpdate(
-              reference.id,
-              em,
-            )) ?? undefined;
-        }
-
-        if (!reference) {
-          transaction.markPendingReference();
-          await this.wagerTransactionRepository.save(transaction, em);
-
-          return {
-            transactionId: transaction.id,
-            status: transaction.status,
-            idempotentReplay: false,
-          };
-        }
-
-        const referenceIsValid =
-          reference.status === WagerTransactionStatus.Processed &&
-          reference.providerId === transaction.providerId &&
-          reference.playerId === transaction.playerId &&
-          reference.walletId === transaction.walletId &&
-          reference.roundId === transaction.roundId &&
-          reference.gameId === transaction.gameId &&
-          reference.money.currency === transaction.money.currency &&
-          reference.money.toString() === transaction.money.toString() &&
-          (kind !== WagerTransactionKind.Refund ||
-            reference.kind === WagerTransactionKind.Bet) &&
-          (kind !== WagerTransactionKind.Rollback ||
-            [
-              WagerTransactionKind.Bet,
-              WagerTransactionKind.Win,
-              WagerTransactionKind.Refund,
-            ].includes(reference.kind));
-
-        if (!referenceIsValid) {
-          transaction.reject(INVALID_REFERENCE);
-          await this.wagerTransactionRepository.save(transaction, em);
-
-          return {
-            transactionId: transaction.id,
-            status: transaction.status,
-            failureCode: transaction.failureCode,
-            idempotentReplay: false,
-          };
-        }
-
-        const reversals =
-          await this.wagerTransactionRepository.findByReferenceTransactionId(
-            reference.id,
+            input.idempotencyKey,
             em,
           );
 
-        const alreadyReversed = reversals.some(
-          (item) =>
-            item.status === WagerTransactionStatus.Processed &&
-            (item.kind === WagerTransactionKind.Refund ||
-              item.kind === WagerTransactionKind.Rollback),
+        const existingByExternalId =
+          await this.wagerTransactionRepository.findByProviderAndExternalTransactionId(
+            input.providerId,
+            input.externalTransactionId,
+            em,
+          );
+
+        if (
+          existingByKey &&
+          existingByExternalId &&
+          existingByKey.id !== existingByExternalId.id
+        ) {
+          throw new ConflictException(
+            'Idempotency key and external transaction ID identify different transactions',
+          );
+        }
+
+        const existing = existingByKey ?? existingByExternalId;
+
+        if (existing) {
+          if (!existing.matchesPayload(payloadHash)) {
+            throw new ConflictException(
+              'Transaction identifier was reused with a different payload',
+            );
+          }
+
+          return {
+            transactionId: existing.id,
+            status: existing.status,
+            failureCode: existing.failureCode,
+            balance: existing.resultBalance?.toJSON(),
+            version: existing.resultWalletVersion,
+            idempotentReplay: true,
+          };
+        }
+
+        const wallet = await this.walletRepository.findByIdForUpdate(
+          input.walletId,
+          em,
         );
 
-        if (alreadyReversed) {
-          transaction.reject(REFERENCE_ALREADY_REVERSED);
+        if (!wallet) {
+          throw new NotFoundException('Wallet not found');
+        }
+
+        if (
+          wallet.playerId !== input.playerId ||
+          wallet.balance.currency !== money.currency
+        ) {
+          throw new BadRequestException(
+            'Wallet does not match player or currency',
+          );
+        }
+
+        const transaction = WagerTransaction.create({
+          id: randomUUID(),
+          providerId: input.providerId,
+          externalTransactionId: input.externalTransactionId,
+          idempotencyKey: input.idempotencyKey,
+          payloadHash,
+          walletId: wallet.id,
+          playerId: input.playerId,
+          roundId: input.roundId,
+          gameId: input.gameId,
+          kind,
+          money,
+          referenceExternalTransactionId: input.referenceExternalTransactionId,
+        });
+
+        let reference: WagerTransaction | undefined;
+
+        if (requiresReference) {
+          reference =
+            (await this.wagerTransactionRepository.findByProviderAndExternalTransactionId(
+              input.providerId,
+              input.referenceExternalTransactionId!,
+              em,
+            )) ?? undefined;
+
+          if (reference) {
+            reference =
+              (await this.wagerTransactionRepository.findByIdForUpdate(
+                reference.id,
+                em,
+              )) ?? undefined;
+          }
+
+          if (!reference) {
+            transaction.markPendingReference();
+            await this.wagerTransactionRepository.save(transaction, em);
+
+            return {
+              transactionId: transaction.id,
+              status: transaction.status,
+              idempotentReplay: false,
+            };
+          }
+
+          const referenceIsValid =
+            reference.status === WagerTransactionStatus.Processed &&
+            reference.providerId === transaction.providerId &&
+            reference.playerId === transaction.playerId &&
+            reference.walletId === transaction.walletId &&
+            reference.roundId === transaction.roundId &&
+            reference.gameId === transaction.gameId &&
+            reference.money.currency === transaction.money.currency &&
+            reference.money.toString() === transaction.money.toString() &&
+            (kind !== WagerTransactionKind.Refund ||
+              reference.kind === WagerTransactionKind.Bet) &&
+            (kind !== WagerTransactionKind.Rollback ||
+              [
+                WagerTransactionKind.Bet,
+                WagerTransactionKind.Win,
+                WagerTransactionKind.Refund,
+              ].includes(reference.kind));
+
+          if (!referenceIsValid) {
+            transaction.reject(INVALID_REFERENCE);
+            await this.wagerTransactionRepository.save(transaction, em);
+
+            return {
+              transactionId: transaction.id,
+              status: transaction.status,
+              failureCode: transaction.failureCode,
+              idempotentReplay: false,
+            };
+          }
+
+          const reversals =
+            await this.wagerTransactionRepository.findByReferenceTransactionId(
+              reference.id,
+              em,
+            );
+
+          const alreadyReversed = reversals.some(
+            (item) =>
+              item.status === WagerTransactionStatus.Processed &&
+              (item.kind === WagerTransactionKind.Refund ||
+                item.kind === WagerTransactionKind.Rollback),
+          );
+
+          if (alreadyReversed) {
+            transaction.reject(REFERENCE_ALREADY_REVERSED);
+            await this.wagerTransactionRepository.save(transaction, em);
+
+            return {
+              transactionId: transaction.id,
+              status: transaction.status,
+              failureCode: transaction.failureCode,
+              idempotentReplay: false,
+            };
+          }
+        }
+
+        if (kind === WagerTransactionKind.Loss) {
+          transaction.markProcessed(undefined, new Date());
+          transaction.recordResult(wallet.balance, wallet.version);
+
           await this.wagerTransactionRepository.save(transaction, em);
+
+          await this.recordOutboxEvent(em, 'WagerTransactionProcessed', {
+            transactionId: transaction.id,
+            providerId: transaction.providerId,
+            walletId: wallet.id,
+            playerId: transaction.playerId,
+            kind: transaction.kind,
+            status: transaction.status,
+            amount: transaction.money.toString(),
+            currency: transaction.money.currency,
+            balance: wallet.balance.toJSON(),
+            version: wallet.version,
+          });
 
           return {
             transactionId: transaction.id,
             status: transaction.status,
-            failureCode: transaction.failureCode,
+            balance: wallet.balance.toJSON(),
+            version: wallet.version,
             idempotentReplay: false,
           };
         }
-      }
 
-      if (kind === WagerTransactionKind.Loss) {
-        transaction.markProcessed(undefined, new Date());
+        const direction = transaction.ledgerDirectionFor(reference);
+        let movement;
+
+        try {
+          movement =
+            direction === LedgerDirection.Debit
+              ? wallet.debit(money)
+              : wallet.credit(money);
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            error.message === 'Insufficient wallet balance'
+          ) {
+            transaction.reject(INSUFFICIENT_FUNDS);
+            await this.wagerTransactionRepository.save(transaction, em);
+
+            return {
+              transactionId: transaction.id,
+              status: transaction.status,
+              failureCode: transaction.failureCode,
+              idempotentReplay: false,
+            };
+          }
+
+          throw error;
+        }
+
+        transaction.markProcessed(reference?.id, new Date());
         transaction.recordResult(wallet.balance, wallet.version);
 
+        const ledgerEntry = WalletLedgerEntry.create({
+          id: randomUUID(),
+          walletId: wallet.id,
+          transactionId: transaction.id,
+          direction,
+          money,
+          balanceBefore: movement.balanceBefore,
+          balanceAfter: movement.balanceAfter,
+        });
+
+        await this.walletRepository.save(wallet, em);
         await this.wagerTransactionRepository.save(transaction, em);
+        await this.walletLedgerRepository.save(ledgerEntry, em);
+
+        await this.recordOutboxEvent(em, 'WagerTransactionProcessed', {
+          transactionId: transaction.id,
+          providerId: transaction.providerId,
+          walletId: wallet.id,
+          playerId: transaction.playerId,
+          kind: transaction.kind,
+          status: transaction.status,
+          amount: transaction.money.toString(),
+          currency: transaction.money.currency,
+          balance: wallet.balance.toJSON(),
+          version: wallet.version,
+        });
 
         return {
           transactionId: transaction.id,
@@ -300,59 +390,69 @@ export class ProcessWagerTransactionUseCase {
           version: wallet.version,
           idempotentReplay: false,
         };
-      }
-
-      const direction = transaction.ledgerDirectionFor(reference);
-      let movement;
-
-      try {
-        movement =
-          direction === LedgerDirection.Debit
-            ? wallet.debit(money)
-            : wallet.credit(money);
-      } catch (error) {
-        if (
-          error instanceof Error &&
-          error.message === 'Insufficient wallet balance'
-        ) {
-          transaction.reject(INSUFFICIENT_FUNDS);
-          await this.wagerTransactionRepository.save(transaction, em);
-
-          return {
-            transactionId: transaction.id,
-            status: transaction.status,
-            failureCode: transaction.failureCode,
-            idempotentReplay: false,
-          };
-        }
-
+      });
+    } catch (error) {
+      if (!(error instanceof UniqueConstraintViolationException)) {
         throw error;
       }
 
-      transaction.markProcessed(reference?.id, new Date());
-      transaction.recordResult(wallet.balance, wallet.version);
+      const existing = await this.databaseTransaction.execute(async (em) => {
+        const existingByKey =
+          await this.wagerTransactionRepository.findByProviderAndIdempotencyKey(
+            input.providerId,
+            input.idempotencyKey,
+            em,
+          );
 
-      const ledgerEntry = WalletLedgerEntry.create({
-        id: randomUUID(),
-        walletId: wallet.id,
-        transactionId: transaction.id,
-        direction,
-        money,
-        balanceBefore: movement.balanceBefore,
-        balanceAfter: movement.balanceAfter,
+        const existingByExternalId =
+          await this.wagerTransactionRepository.findByProviderAndExternalTransactionId(
+            input.providerId,
+            input.externalTransactionId,
+            em,
+          );
+
+        if (
+          existingByKey &&
+          existingByExternalId &&
+          existingByKey.id !== existingByExternalId.id
+        ) {
+          throw new ConflictException(
+            'Idempotency key and external transaction ID identify different transactions',
+          );
+        }
+
+        return existingByKey ?? existingByExternalId;
       });
 
-      await this.walletRepository.save(wallet, em);
-      await this.wagerTransactionRepository.save(transaction, em);
-      await this.walletLedgerRepository.save(ledgerEntry, em);
+      if (!existing) {
+        throw error;
+      }
+
+      if (!existing.matchesPayload(payloadHash)) {
+        throw new ConflictException(
+          'Transaction identifier was reused with a different payload',
+        );
+      }
 
       return {
-        transactionId: transaction.id,
-        status: transaction.status,
-        balance: wallet.balance.toJSON(),
-        version: wallet.version,
-        idempotentReplay: false,
+        transactionId: existing.id,
+        status: existing.status,
+        failureCode: existing.failureCode,
+        balance: existing.resultBalance?.toJSON(),
+        version: existing.resultWalletVersion,
+        idempotentReplay: true,
       };
-    });
+    }
+  }
+
+  private async recordOutboxEvent(
+    em: EntityManager,
+    eventType: string,
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    const event = new OutboxEvent();
+    event.eventType = eventType;
+    event.payload = payload;
+    await this.outboxRepository.save(event, em);
   }
 }

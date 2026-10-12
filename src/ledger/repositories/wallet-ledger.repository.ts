@@ -7,5 +7,19 @@ export interface WalletLedgerRepository {
 
   findByTransactionId(transactionId: string): Promise<WalletLedgerEntry[]>;
 
+  findByWalletId(
+    walletId: string,
+    limit: number,
+    cursor?: {
+      createdAt: Date;
+      id: string;
+    },
+  ): Promise<WalletLedgerEntry[]>;
+
+  reconcileWalletBalance(walletId: string): Promise<{
+    entryCount: number;
+    reconstructedBalance: string;
+  }>;
+
   save(entry: WalletLedgerEntry, em: EntityManager): Promise<void>;
 }

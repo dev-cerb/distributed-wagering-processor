@@ -12,6 +12,9 @@ import { WagerTransactionsModule } from './wager-transactions/wager-transaction.
 import { WagerProcessingModule } from './wager-transactions/wager-processing.module.js';
 import { LedgerModule } from './ledger/ledger.module.js';
 import { DatabaseTransactionModule } from './shared/infrastructure/database-transaction.module.js';
+import { InboxModule } from './inbox/inbox.module.js';
+import { ScheduleModule } from '@nestjs/schedule';
+import { HealthModule } from './health/health.module.js';
 
 @Module({
   imports: [
@@ -19,6 +22,7 @@ import { DatabaseTransactionModule } from './shared/infrastructure/database-tran
       isGlobal: true,
       envFilePath: '.env',
     }),
+    ScheduleModule.forRoot(),
     MikroOrmModule.forRoot({
       driver: PostgreSqlDriver,
       clientUrl: process.env.DATABASE_URL,
@@ -30,6 +34,8 @@ import { DatabaseTransactionModule } from './shared/infrastructure/database-tran
     LedgerModule,
     DatabaseTransactionModule,
     WagerProcessingModule,
+    InboxModule,
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [AppService],

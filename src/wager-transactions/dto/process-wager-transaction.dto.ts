@@ -5,9 +5,23 @@ import {
   IsOptional,
   IsString,
   Matches,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 
 import { WagerTransactionKind } from '../domain/wager-transaction.js';
+
+class MoneyDto {
+  @IsDefined()
+  @IsString()
+  @Matches(/^\d+(\.\d{1,2})?$/)
+  amount!: string;
+
+  @IsDefined()
+  @IsString()
+  @IsNotEmpty()
+  currency!: string;
+}
 
 export class ProcessWagerTransactionDto {
   @IsDefined()
@@ -45,14 +59,9 @@ export class ProcessWagerTransactionDto {
   kind!: WagerTransactionKind;
 
   @IsDefined()
-  @IsString()
-  @Matches(/^\d+(\.\d{1,2})?$/)
-  amount!: string;
-
-  @IsDefined()
-  @IsString()
-  @IsNotEmpty()
-  currency!: string;
+  @ValidateNested()
+  @Type(() => MoneyDto)
+  money!: MoneyDto;
 
   @IsOptional()
   @IsString()

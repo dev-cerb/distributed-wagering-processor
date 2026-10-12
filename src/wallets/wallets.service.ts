@@ -29,6 +29,44 @@ export interface OpenWalletInput {
   };
 }
 
+function encodeCursor(cursor: { createdAt: Date; id: string }): string {
+  return Buffer.from(
+    JSON.stringify({
+      createdAt: cursor.createdAt.toISOString(),
+      id: cursor.id,
+    }),
+  ).toString('base64url');
+}
+
+function decodeCursor(cursor: string): { createdAt: Date; id: string } {
+  try {
+    const decoded = JSON.parse(
+      Buffer.from(cursor, 'base64url').toString('utf8'),
+    ) as { createdAt?: unknown; id?: unknown };
+
+    if (
+      typeof decoded.createdAt !== 'string' ||
+      typeof decoded.id !== 'string' ||
+      !decoded.id.trim()
+    ) {
+      throw new Error('Invalid cursor');
+    }
+
+    const createdAt = new Date(decoded.createdAt);
+
+    if (
+      Number.isNaN(createdAt.getTime()) ||
+      createdAt.toISOString() !== decoded.createdAt
+    ) {
+      throw new Error('Invalid cursor');
+    }
+
+    return { createdAt, id: decoded.id };
+  } catch {
+    throw new BadRequestException('Invalid cursor');
+  }
+}
+
 @Injectable()
 export class WalletsService {
   constructor(
@@ -131,5 +169,109 @@ export class WalletsService {
         version: wallet.version,
       };
     });
+  }
+
+  async getWallet(walletId: string) {
+    const wallet = await this.walletRepository.findById(walletId);
+
+    if (!wallet) {
+      throw new BadRequestException('Wallet not found');
+    }
+
+    return {
+      id: wallet.id,
+      playerId: wallet.playerId,
+      currency: wallet.currency,
+      balance: wallet.balance.toJSON(),
+      version: wallet.version,
+      createdAt: wallet.createdAt,
+      updatedAt: wallet.updatedAt,
+    };
+  }
+
+  async reconcileWallet(walletId: string) {
+    const wallet = await this.walletRepository.findById(walletId);
+
+    if (!wallet) {
+      throw new BadRequestException('Wallet not found');
+    }
+
+    const reconciliation =
+      await this.walletLedgerRepository.reconcileWalletBalance(walletId);
+
+    const storedAmount = wallet.balance.toString();
+    const calculatedAmount = reconciliation.reconstructedBalance;
+
+    // Valores monetários em centavos para evitar
+    // imprecisões de ponto flutuante.
+    const storedCents = Math.round(Number(storedAmount) * 100);
+    const calculatedCents = Math.round(Number(calculatedAmount) * 100);
+
+    const differenceCents = storedCents - calculatedCents;
+
+    const formatAmount = (cents: number) => (cents / 100).toFixed(2);
+
+    return {
+      walletId: wallet.id,
+      storedBalance: {
+        amount: storedAmount,
+        currency: wallet.currency,
+      },
+      calculatedBalance: {
+        amount: calculatedAmount,
+        currency: wallet.currency,
+      },
+      difference: {
+        amount: formatAmount(differenceCents),
+        currency: wallet.currency,
+      },
+      consistent: differenceCents === 0,
+      checkedEntries: reconciliation.entryCount,
+    };
+  }
+
+  async getLedger(walletId: string, limit = 50, cursor?: string) {
+    const wallet = await this.walletRepository.findById(walletId);
+
+    if (!wallet) {
+      throw new BadRequestException('Wallet not found');
+    }
+
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new BadRequestException(
+        'Limit must be an integer between 1 and 100',
+      );
+    }
+
+    const decodedCursor = cursor ? decodeCursor(cursor) : undefined;
+
+    const entries = await this.walletLedgerRepository.findByWalletId(
+      walletId,
+      limit + 1,
+      decodedCursor,
+    );
+
+    const hasMore = entries.length > limit;
+    const items = hasMore ? entries.slice(0, limit) : entries;
+    const lastItem = items[items.length - 1];
+
+    return {
+      items: items.map((entry) => ({
+        id: entry.id,
+        transactionId: entry.transactionId,
+        direction: entry.direction,
+        amount: entry.money.toJSON(),
+        balanceBefore: entry.balanceBefore.toJSON(),
+        balanceAfter: entry.balanceAfter.toJSON(),
+        createdAt: entry.createdAt,
+      })),
+      nextCursor:
+        hasMore && lastItem
+          ? encodeCursor({
+              createdAt: lastItem.createdAt,
+              id: lastItem.id,
+            })
+          : null,
+    };
   }
 }

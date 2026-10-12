@@ -3,16 +3,25 @@ import { EntityManager } from '@mikro-orm/postgresql';
 import { WagerTransaction } from '../domain/wager-transaction.js';
 
 export interface WagerTransactionRepository {
-  findById(id: string): Promise<WagerTransaction | null>;
+  findByIdForRead(id: string): Promise<WagerTransaction | null>;
+
+  findById(id: string, em: EntityManager): Promise<WagerTransaction | null>;
+
+  findByProviderAndExternalTransactionIdForRead(
+    providerId: string,
+    externalTransactionId: string,
+  ): Promise<WagerTransaction | null>;
 
   findByProviderAndExternalTransactionId(
     providerId: string,
     externalTransactionId: string,
+    em: EntityManager,
   ): Promise<WagerTransaction | null>;
 
   findByProviderAndIdempotencyKey(
     providerId: string,
     idempotencyKey: string,
+    em: EntityManager,
   ): Promise<WagerTransaction | null>;
 
   findByReferenceTransactionId(

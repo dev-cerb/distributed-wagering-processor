@@ -19,7 +19,7 @@ export class WagerTransactionRepositoryImpl implements WagerTransactionRepositor
     private readonly repository: EntityRepository<WagerTransactionEntity>,
   ) {}
 
-  async findById(id: string): Promise<WagerTransaction | null> {
+  async findByIdForRead(id: string): Promise<WagerTransaction | null> {
     const entity = await this.repository.findOne({ id });
 
     if (!entity) {
@@ -29,7 +29,21 @@ export class WagerTransactionRepositoryImpl implements WagerTransactionRepositor
     return this.toDomain(entity);
   }
 
-  async findByProviderAndExternalTransactionId(
+  async findById(
+    id: string,
+    em: EntityManager,
+  ): Promise<WagerTransaction | null> {
+    const repository = em.getRepository(WagerTransactionEntity);
+    const entity = await repository.findOne({ id });
+
+    if (!entity) {
+      return null;
+    }
+
+    return this.toDomain(entity);
+  }
+
+  async findByProviderAndExternalTransactionIdForRead(
     providerId: string,
     externalTransactionId: string,
   ): Promise<WagerTransaction | null> {
@@ -45,11 +59,33 @@ export class WagerTransactionRepositoryImpl implements WagerTransactionRepositor
     return this.toDomain(entity);
   }
 
+  async findByProviderAndExternalTransactionId(
+    providerId: string,
+    externalTransactionId: string,
+    em: EntityManager,
+  ): Promise<WagerTransaction | null> {
+    const repository = em.getRepository(WagerTransactionEntity);
+
+    const entity = await repository.findOne({
+      providerId,
+      externalTransactionId,
+    });
+
+    if (!entity) {
+      return null;
+    }
+
+    return this.toDomain(entity);
+  }
+
   async findByProviderAndIdempotencyKey(
     providerId: string,
     idempotencyKey: string,
+    em: EntityManager,
   ): Promise<WagerTransaction | null> {
-    const entity = await this.repository.findOne({
+    const repository = em.getRepository(WagerTransactionEntity);
+
+    const entity = await repository.findOne({
       providerId,
       idempotencyKey,
     });
@@ -122,6 +158,8 @@ export class WagerTransactionRepositoryImpl implements WagerTransactionRepositor
       status: transaction.status,
       failureCode: transaction.failureCode ?? null,
       processedAt: transaction.processedAt ?? null,
+      resultBalance: transaction.resultBalance?.toString() ?? null,
+      resultWalletVersion: transaction.resultWalletVersion ?? null,
     };
 
     if (entity) {
@@ -160,6 +198,13 @@ export class WagerTransactionRepositoryImpl implements WagerTransactionRepositor
       referenceTransactionId: entity.referenceTransaction?.id,
       failureCode: entity.failureCode ?? undefined,
       processedAt: entity.processedAt ?? undefined,
+      resultBalance: entity.resultBalance
+        ? Money.from({
+            amount: entity.resultBalance,
+            currency: entity.currency,
+          })
+        : undefined,
+      resultWalletVersion: entity.resultWalletVersion ?? undefined,
     });
   }
 }
